@@ -49,6 +49,28 @@ Automate escrow-backed freelance agreements with AI-powered work validation usin
 
    This creates a Circle developer-controlled wallet and writes the wallet ID and address into your `.env.local`.
 
+   Run this bootstrap once for a new environment. The script creates a new
+   wallet set and wallet on each invocation; it does not resume or reuse the
+   wallet ID already in `.env.local`. If this environment already has a wallet,
+   keep its configuration and skip this step rather than creating another wallet.
+
+   Before running, ensure `.env.local` contains the two assignments below, even
+   when their values are blank. The script updates existing assignment lines; it
+   does not append missing ones.
+
+   If wallet creation succeeds but writing `.env.local` fails, do not immediately
+   rerun the script. Recover the created wallet ID and address from the script
+   output or your Circle Console, then restore the assignments:
+
+   ```dotenv
+   NEXT_PUBLIC_AGENT_WALLET_ID=<created-wallet-id>
+   NEXT_PUBLIC_AGENT_WALLET_ADDRESS=<created-wallet-address>
+   ```
+
+   Keep API keys and the entity secret server-side. Retain any previously created
+   wallet's ID and address when changing environments so that funds and
+   agreements tied to that wallet remain traceable.
+
 4. Start the local Supabase instance (requires Docker Desktop running):
 
    ```bash
