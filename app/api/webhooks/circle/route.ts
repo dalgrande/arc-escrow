@@ -149,6 +149,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Circle key ids are UUIDs; anything else never reaches the outbound key lookup.
+    if (!KEY_ID_PATTERN.test(keyId)) {
+      return NextResponse.json({ error: "Invalid signature" }, { status: 403 });
+    }
+
     // Circle signs the exact bytes it sent, so verify those, not a re-serialization.
     const rawBody = await req.text();
 
@@ -220,13 +225,24 @@ async function verifyCircleSignature(
   return verifier.verify(publicKey, signatureUint8Array);
 }
 
+const KEY_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// A key id always maps to the same public key (per Circle's docs), so cache for the process lifetime.
+const publicKeyCache = new Map<string, string>();
+
 async function getCirclePublicKey(keyId: string) {
+  const cached = publicKeyCache.get(keyId);
+  if (cached) {
+    return cached;
+  }
+
   if (!process.env.CIRCLE_API_KEY) {
     throw new Error("Circle API key is not set");
   }
 
   try {
-    const response = await fetch(`https://api.circle.com/v2/notifications/publicKey/${keyId}`, {
+    const response = await fetch(`https://api.circle.com/v2/notifications/publicKey/${encodeURIComponent(keyId)}`, {
       method: "GET",
       headers: {
         "Accept": "application/json",
@@ -239,10 +255,14 @@ async function getCirclePublicKey(keyId: string) {
     }
 
     const data = await response.json();
-    const rawPublicKey = data.data.publicKey;
+    const rawPublicKey = data?.data?.publicKey;
+    if (typeof rawPublicKey !== "string" || rawPublicKey.length === 0) {
+      throw new Error("Malformed public key response from Circle");
+    }
 
     const pemPublicKey = `-----BEGIN PUBLIC KEY-----\n${rawPublicKey.match(/.{1,64}/g)?.join("\n")}\n-----END PUBLIC KEY-----`;
 
+    publicKeyCache.set(keyId, pemPublicKey);
     return pemPublicKey;
   } catch (error) {
     console.error("Error fetching Circle public key:", error);
