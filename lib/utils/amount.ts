@@ -18,13 +18,22 @@
 
 export const parseAmount = (amountStr: string): number => {
   const cleanAmount = amountStr
+    .replace(/\b(?:USDC|USD|EURC|EUR)\b/gi, "")
     .replace(/[()]/g, "")
     .replace(/[$€£,\s]/g, "")
     .replace(/−/g, "-");
 
+  // The cleaned string must be a plain decimal in its entirety, with at most
+  // USDC's 6 decimals. parseFloat accepts a valid numeric prefix and ignores
+  // the rest, so "10abc" would parse as 10 and "1e5" as 100000, and extra
+  // decimals would be silently rounded away on-chain.
+  if (!/^\d+(\.\d{1,6})?$/.test(cleanAmount)) {
+    throw new Error(`Invalid amount: ${amountStr}`);
+  }
+
   const amount = parseFloat(cleanAmount);
 
-  if (Number.isNaN(amount) || amount <= 0) {
+  if (amount <= 0) {
     throw new Error(`Invalid amount: ${amountStr}`);
   }
 
@@ -32,5 +41,9 @@ export const parseAmount = (amountStr: string): number => {
 };
 
 export function convertUSDCToContractAmount(amount: number): string {
-  return (amount * 1000000).toString();
+  // Round to whole base units: USDC has 6 decimals and the value is passed as a
+  // uint256, so the result has to be an integer. amount * 1000000 is float math,
+  // and ordinary amounts like 2.01 land just under (2009999.9999999998), which
+  // .toString() would carry through as a fractional, invalid on-chain amount.
+  return Math.round(amount * 1000000).toString();
 }

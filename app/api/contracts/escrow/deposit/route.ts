@@ -76,6 +76,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Could not retrieve contract address" }, { status: 500 })
     }
 
+    // Parse before any funds move: a throw after pay() would skip the record below and invite a second payment.
+    const amount = parseAmount(contractTransaction.terms.amounts?.[0].amount);
     const contractAmount = Number(convertUSDCToContractAmount(contractTransaction.transactions.amount));
 
     const circleDepositResponse = await circleDeveloperSdk.createContractExecutionTransaction({
@@ -97,7 +99,6 @@ export async function POST(req: NextRequest) {
 
     console.log("Funds deposit transaction created:", circleDepositResponse.data);
 
-    const amount = parseAmount(contractTransaction.terms.amounts?.[0].amount);
     await agreementService.createTransaction({
       walletId: depositorWallet.id,
       circleTransactionId: circleDepositResponse.data?.id,
