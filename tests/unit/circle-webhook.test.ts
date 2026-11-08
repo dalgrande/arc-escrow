@@ -32,11 +32,15 @@ import { POST } from "@/app/api/webhooks/circle/route";
 const { publicKey, privateKey } = crypto.generateKeyPairSync("ec", { namedCurve: "P-256" });
 const publicKeyBase64 = publicKey.export({ type: "spki", format: "der" }).toString("base64");
 
-function signedRequest(rawBody: string, { signWith = rawBody } = {}) {
+// A fresh key id per request by default, so the route's public-key cache never carries over between tests.
+function signedRequest(
+  rawBody: string,
+  { signWith = rawBody, keyId = crypto.randomUUID() }: { signWith?: string; keyId?: string } = {}
+) {
   const signature = crypto.createSign("SHA256").update(signWith).sign(privateKey).toString("base64");
   return new NextRequest("http://localhost/api/webhooks/circle", {
     method: "POST",
-    headers: { "x-circle-signature": signature, "x-circle-key-id": "key-1" },
+    headers: { "x-circle-signature": signature, "x-circle-key-id": keyId },
     body: rawBody,
   });
 }
@@ -104,6 +108,60 @@ describe("POST /api/webhooks/circle — authenticity", () => {
     const body = JSON.stringify(notification({ state: "COMPLETE" }), null, 4);
     queueFlow({ txRow: tx("DEPLOY_CONTRACT") });
     expect((await POST(signedRequest(body))).status).toBe(200);
+  });
+
+  it("rejects a key id that is not a UUID without calling Circle", async () => {
+    const body = JSON.stringify(notification({ state: "COMPLETE" }));
+    const res = await POST(signedRequest(body, { keyId: "../../v1/w3s/wallets" }));
+    expect(res.status).toBe(403);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(admin.from).not.toHaveBeenCalled();
+  });
+
+  it("fetches a key id's public key once and reuses it", async () => {
+    const keyId = crypto.randomUUID();
+    const body = JSON.stringify(notification({ state: "COMPLETE" }));
+    queueFlow({ txRow: tx("DEPLOY_CONTRACT") });
+    await POST(signedRequest(body, { keyId }));
+    queueFlow({ txRow: tx("DEPLOY_CONTRACT") });
+    await POST(signedRequest(body, { keyId }));
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("answers a failed key fetch with a retryable 503, then recovers on redelivery", async () => {
+    const keyId = crypto.randomUUID();
+    const body = JSON.stringify(notification({ state: "COMPLETE" }));
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(null, { status: 503 }));
+    expect((await POST(signedRequest(body, { keyId }))).status).toBe(503);
+    expect(admin.from).not.toHaveBeenCalled();
+    queueFlow({ txRow: tx("DEPLOY_CONTRACT") });
+    expect((await POST(signedRequest(body, { keyId }))).status).toBe(200);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([{ data: {} }, { data: { publicKey: "" } }, { data: { publicKey: "bm90IGEga2V5" } }])(
+    "does not trust or cache a malformed key response %j",
+    async (payload) => {
+      const keyId = crypto.randomUUID();
+      const body = JSON.stringify(notification({ state: "COMPLETE" }));
+      vi.mocked(fetch).mockResolvedValueOnce(Response.json(payload));
+      expect((await POST(signedRequest(body, { keyId }))).status).toBe(503);
+      queueFlow({ txRow: tx("DEPLOY_CONTRACT") });
+      expect((await POST(signedRequest(body, { keyId }))).status).toBe(200);
+      expect(fetch).toHaveBeenCalledTimes(2);
+    }
+  );
+
+  it("shares one key fetch across concurrent requests and key id casing", async () => {
+    const keyId = crypto.randomUUID();
+    const body = JSON.stringify(notification({ state: "COMPLETE" }));
+    queueFlow({ txRow: tx("DEPLOY_CONTRACT") });
+    queueFlow({ txRow: tx("DEPLOY_CONTRACT") });
+    await Promise.all([
+      POST(signedRequest(body, { keyId })),
+      POST(signedRequest(body, { keyId: keyId.toUpperCase() })),
+    ]);
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 
   it("answers 400 to a validly signed body that is not JSON", async () => {
