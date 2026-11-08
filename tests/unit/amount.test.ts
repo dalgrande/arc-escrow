@@ -26,7 +26,13 @@ describe("parseAmount", () => {
     expect(parseAmount("(42.01)")).toBe(42.01);
   });
 
-  it.each(["10abc", "1e5", "0x10", "Infinity", "1.2.3", ".5", "5.", ""])(
+  it("accepts amounts labelled with a currency code", () => {
+    expect(parseAmount("500 USDC")).toBe(500);
+    expect(parseAmount("USD 1,500")).toBe(1500);
+    expect(parseAmount("1,500.00 usd")).toBe(1500);
+  });
+
+  it.each(["10abc", "1e5", "0x10", "Infinity", "1.2.3", ".5", "5.", "", "0.0000004", "1.0000005", "USDC"])(
     "rejects the malformed amount %j instead of reading a numeric prefix",
     (input) => {
       expect(() => parseAmount(input)).toThrow(/Invalid amount/);

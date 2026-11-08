@@ -18,14 +18,16 @@
 
 export const parseAmount = (amountStr: string): number => {
   const cleanAmount = amountStr
+    .replace(/\b(?:USDC|USD|EURC|EUR)\b/gi, "")
     .replace(/[()]/g, "")
     .replace(/[$€£,\s]/g, "")
     .replace(/−/g, "-");
 
-  // The cleaned string must be a plain decimal in its entirety. parseFloat
-  // accepts a valid numeric prefix and ignores the rest, so "10abc" would parse
-  // as 10 and "1e5" as 100000 — both silently altering a monetary value.
-  if (!/^\d+(\.\d+)?$/.test(cleanAmount)) {
+  // The cleaned string must be a plain decimal in its entirety, with at most
+  // USDC's 6 decimals. parseFloat accepts a valid numeric prefix and ignores
+  // the rest, so "10abc" would parse as 10 and "1e5" as 100000, and extra
+  // decimals would be silently rounded away on-chain.
+  if (!/^\d+(\.\d{1,6})?$/.test(cleanAmount)) {
     throw new Error(`Invalid amount: ${amountStr}`);
   }
 

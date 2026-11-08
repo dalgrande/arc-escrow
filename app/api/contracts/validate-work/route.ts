@@ -266,6 +266,9 @@ export async function POST(request: Request) {
       );
     }
 
+    // Parse before any funds move: a throw after withdraw() would skip the record below.
+    const amount = parseAmount(agreement.terms.amounts[0].amount);
+
     const circleReleaseResponse =
       await circleDeveloperSdk.createContractExecutionTransaction({
         walletId: beneficiaryWalletId,
@@ -282,7 +285,6 @@ export async function POST(request: Request) {
         },
       });
 
-    const amount = parseAmount(agreement.terms.amounts[0].amount);
     await agreementService.createTransaction({
       walletId: agreement.beneficiary_wallet_id,
       circleTransactionId: circleReleaseResponse.data?.id,
